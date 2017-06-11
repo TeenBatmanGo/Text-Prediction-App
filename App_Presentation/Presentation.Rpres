@@ -1,0 +1,123 @@
+Text Prediction App
+========================================================
+type: prompt
+author: Wang
+date: 14 May 2017
+autosize: true
+transition: concave
+transition-speed: slow
+font-family: 'Helvetica'
+
+Introduction
+========================================================
+type: prompt
+
+This app is a text prediction model. It will predict the next word when given any English text. It is inspired by Swiftkey, a compony which builds a smart keyboard that makes it easier for people to type on their mobile devices. 
+
+If someone types
+
+<strong> I'd like to </strong>
+
+This App will presents five options for what the next word might be.
+
+By applying data science in the area of natural language processing, this app performs pretty well when predicting the next word for real-life texts. 
+
+
+
+Instructions
+========================================================
+type: prompt
+
+1. Enter your text into the given box
+2. Choose a <strong>backoff</strong> method to use (see [More Info](#/slide5) section)
+3. Choose the number of predictions this App will show
+4. Click the Update button
+
+![alt text](demo.jpg)
+
+
+Performance
+========================================================
+type: prompt
+
+```{r cache=TRUE, echo=FALSE, include=FALSE}
+testdata <- readRDS("testdata.rds")
+test_len <- length(testdata)
+
+prep <- function(pred){
+        temp <- tolower(pred)
+        temp <- removePunctuation(temp)
+        temp
+}
+
+get_words <- function(num, k){
+        data <- iconv(testdata[num], "latin1", "ASCII", sub="")
+        sent <- tokenize(data, what = "sentence")[[1]]
+        if(k == 1){
+                sent <- paste0(sent, " ")
+        }
+        else if(k == 2){
+                sent <- paste0(sent, " ", " ")
+        }
+        set.seed(1)
+        rand1 <- sample(1:length(sent), 1)
+        temp <- strsplit(prep(sent[rand1]), " ")[[1]]
+        len <- length(temp)
+        if(len == k){
+                temp[k + 1] <- " "
+                result <- temp
+        }
+        else{
+                set.seed(2)
+                rand <- sample(1:(len-k), 1)
+                result <- temp[rand:(rand + k)]
+        }
+        result
+}
+
+
+oneword_test <- function(func, method, k){
+        temp <- lapply(seq(test_len/4000), get_words, k)
+        pred <- sapply(temp, function(x) x[k+1])
+        test <- sapply(temp, function(x) ifelse(k == 1, x[1], paste(x[1], x[k])))
+        ind <- 1:length(pred) %in% grep("[a-z]+", pred)
+        pred <- pred[ind]
+        test <- test[ind]
+        count_top3 = count_top1 = 0
+        for(i in 1:length(test)){
+                prediction = func(test[i], method, 3)$ngram
+                if(any(prediction %in% pred[i])){
+                        count_top3 = count_top3 + 1
+                        if(prediction[1] == pred[i]){
+                                count_top1 = count_top1 + 1
+                        }
+                }
+        }
+        cat("Method: ", method, "  Predict from previous ", k, "-word", "\n",
+            "Top1 accuracy: ", round(count_top1 / length(test) * 100, 2), "%", "\n", 
+            "Top3 accuracy: ", round(count_top3 / length(test) * 100, 2), "%", "\n", 
+             sep = "")
+}
+```
+
+```{r cache=TRUE, message=FALSE, echo=FALSE, warning=FALSE}
+source("text_predict.R", echo = FALSE, verbose = FALSE)
+oneword_test(text_predict, "stupid_backoff", 1)
+oneword_test(text_predict, "katz_backoff", 1)
+oneword_test(text_predict, "stupid_backoff", 2)
+oneword_test(text_predict, "katz_backoff", 2)
+```
+
+
+More Info
+========================================================
+type: prompt
+id: slide5
+
+<strong>What is backoff?</strong>
+
+Take Katz back-off as an example. It is a generative n-gram language model that estimates the conditional probability of a word given its history in the n-gram. It accomplishes this estimation by "backing-off" to models with smaller histories under certain conditions. By doing so, the model with the most reliable information about a given history is used to provide the better results.
+
+<strong> Where can I use this App? </strong>
+
+The shiny app is here: https://teenbatmango.shinyapps.io/textprediction/

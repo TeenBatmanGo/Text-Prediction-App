@@ -1,0 +1,257 @@
+---
+title: "Exploratory Analysis Report"
+author: "Wang"
+date: "2017.5.6"
+output: html_document
+---
+
+## Overview
+The first step in building a predictive model for text is understanding the distribution and relationship between the words, tokens, and phrases in the text. This report aims to explain my exploratory analysis and my goals for the eventual app and algorithm. This report will be concise and explain only the major features of the data.
+
+## 1. Load Data
+
+Dataset Description: The original dataset contains four databases. Here I will only use the English database. This database contains three txt files: blog, news and twitter. 
+
+```{r warning=FALSE, cache=TRUE}
+blog_size <- file.info('en_US.blogs.txt')$size
+news_size <- file.info('en_US.news.txt')$size
+twitter_size <- file.info('en_US.twitter.txt')$size
+
+blogs <- readLines('en_US.blogs.txt', encoding = 'UTF-8')
+news <- readLines('en_US.news.txt', encoding = 'UTF-8')
+twitter <- readLines('en_US.twitter.txt', encoding = 'UTF-8')
+```
+
+```{r warning=FALSE, cache=TRUE}
+library(knitr)
+
+total_size <- blog_size + news_size + twitter_size
+
+blog_lines <- length(blogs)
+news_lines <- length(news)
+twitter_lines <- length(twitter)
+total_lines <- blog_lines + news_lines + twitter_lines
+
+blog_count <- sum(nchar(blogs))
+news_count <- sum(nchar(news))
+twitter_count <- sum(nchar(twitter))
+total_count <- blog_count + news_count + twitter_count
+
+Rowname <- c("blogs", "news", "twitter", "total")
+Size <- c(blog_size, news_size, twitter_size, total_size) / 1024^2
+Size <- paste(round(Size, 2), "MB", sep = "")
+Lines_count <- prettyNum(c(blog_lines, news_lines, twitter_lines, total_lines), big.mark = ",")
+Words_count <- prettyNum(c(blog_count, news_count, twitter_count, total_count), big.mark = ",")
+
+table <- data.frame(Rowname, Size, Lines_count, Words_count)
+kable(table)
+```
+
+See from the table above, these three txt files are fairly large. If we use these whole datasets in the following steps, this may cost us a lot of time. So here I will only use 1% of each dataset as my training set, though this may lower the accuracy. It's a runtime-accuracy tradeoff.
+
+```{r warning=FALSE, cache=TRUE}
+set.seed(1)
+blog_sam <- sample(blogs, blog_lines / 100)
+news_sam <- sample(news, news_lines / 100)
+twitter_sam <- sample(twitter, twitter_lines / 100)
+total_sam <- c(blog_sam, news_sam, twitter_sam)
+total_sam <- sapply(total_sam, function(row) iconv(row, "latin1", "ASCII", sub=""))           
+```
+
+## 2. Most Frequent n-Gram Words
+
+After randomly choosing subsets, the next step is to use functions from tm package for preprocessing. After that, by constructing a term-document matrix it becomes quite easy to get the most frequent one-gram words. Then use ngram package to get two-gram, three-gram and four-gram words. In the final step I am going to plot four histograms to show the result clearly.
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+library(tm)
+library(ngram)
+
+vec <- VectorSource(total_sam)
+corpus <- VCorpus(vec)
+corpus <- tm_map(corpus, removeNumbers)           
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, stripWhitespace)
+corpus <- tm_map(corpus, content_transformer(tolower))
+
+get_freq <- function(str, k = 15){
+        corpus <- tm_map(str, removeWords, stopwords("english"))
+        tdm_one <- TermDocumentMatrix(corpus)
+        freq_1_gram <- findMostFreqTerms(tdm_one, n = k, INDEX = rep(1,length(total_sam)))$`1`
+        t(data.frame(freq_1_gram))
+}
+freq_1_gram <- get_freq(corpus)
+
+kable(freq_1_gram)
+```
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+library(wordcloud)
+library(PerformanceAnalytics)
+
+freq_1_gram_cloud <- get_freq(corpus, k = 600)
+freq_1_gram_cloud = melt(data.frame(freq_1_gram_cloud))
+wordcloud(freq_1_gram_cloud[,1], freq_1_gram_cloud[,2], colors = tol21rainbow)
+```
+
+In the preprocessing step of finding one-gram and two-gram words, I remove some words called "stopwords". They are the most common words in real life but they are useless when dealing with one-gram and two-gram words. For example, we don't actually care how many times 'the' appears.
+
+However, stopwords are quite useful in three-gram and four-gram words. Without them, words may look pretty weird. 
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+# Generate top k frequent n-gram words
+Top_ngram <- function(str, n, k = 15){
+        if(n == 2){
+                corpus <- tm_map(str, removeWords, stopwords("english"))
+        }
+        total_sam_prep <- sapply(corpus, as.character)
+        temp = ngram_asweka(concatenate(total_sam_prep), min = n, max = n)
+        top = sort(table(temp), decreasing = TRUE)[1:k]
+        top_df = data.frame(top)
+        colnames(top_df) = paste("freq_", n, "_gram", sep = "")
+        t(top_df)
+}
+
+freq_2_gram <- Top_ngram(corpus, n = 2)
+freq_3_gram <- Top_ngram(corpus, n = 3)
+freq_4_gram <- Top_ngram(corpus, n = 4)
+
+rm(corpus)
+
+kable(freq_2_gram)
+```
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+library(ggplot2)
+library(reshape2)
+freq_1_gram = melt(data.frame(freq_1_gram))
+freq_2_gram = melt(data.frame(freq_2_gram))
+freq_3_gram = melt(data.frame(freq_3_gram))
+freq_4_gram = melt(data.frame(freq_4_gram))
+
+# plot a histogram for top k frequent n-gram words
+ngram_plot <- function(dat, n){
+        g <- ggplot(dat, aes(x = variable, y = value)) 
+        g <- g + geom_bar(stat = "identity", width = 0.8, position = position_dodge(0.7), fill = "lightblue", colour = "black")
+        g <- g + geom_text(aes(label = value), vjust = 1.5) + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+        g + xlab(paste(n,"-Gram Words", sep = "")) + ylab("Frequency")
+}
+
+ngram_plot(freq_1_gram, 1) + ggtitle("Most Frequent One-Gram Words")
+ngram_plot(freq_2_gram, 2) + ggtitle("Most Frequent Two-Gram Words")
+ngram_plot(freq_3_gram, 3) + ggtitle("Most Frequent Three-Gram Words")
+ngram_plot(freq_4_gram, 4) + ggtitle("Most Frequent Four-Gram Words")
+```
+
+
+## 3. My plans for the Prediction Algorithm
+What I have done above is just a basic exploratory analysis. There are several problems I need to handle before I can build a prediction model.
+
+1. Runtime-accuracy tradeoff. How large should my training set be? How to achieve a balance between runtime and accuracy?
+2. Whether to remove stopwords or not.
+3. n-grams. Should I keep increasing n? What is the best n?
+4. Besides finding n-gram words, are there other methods to build a prediction model?
+
+So next I will try to solve these problems one by one.
+
+
+## 4. Words Distribution
+
+```{r warning=FALSE, cache=TRUE}
+# functions in quanteda package can be faster and simpler.
+library(quanteda)
+
+total_sam <- c(blog_sam, news_sam, twitter_sam)
+qcor <- corpus(total_sam)
+mydfm <- dfm(qcor, removePunct = TRUE, removeNumbers = TRUE, verbose = TRUE, ngram = 1)
+set.seed(100)
+textplot_wordcloud(mydfm, min.freq = 400, random.order = FALSE, rot.per = 0.25, colors = RColorBrewer::brewer.pal(8,"Dark2"))
+topfeat <- topfeatures(mydfm, length(total_sam))
+
+topDf <- melt(data.frame(t(topfeat[1:30])))
+topDf$variable <- with(topDf, reorder(variable, -value))
+g <- ggplot(topDf) + geom_point(aes(x = variable, y = value)) 
+g + theme(axis.text.x=element_text(angle=90, hjust=1))
+
+sum(topfeat == 1) / length(topfeat)
+words <- topfeat[topfeat > 1]
+dat <- melt(data.frame(t(words)))
+total_freq <- sum(dat[,2])
+x <- 1:length(words)
+y <- sum(dat[,2][1]) / total_freq
+for(i in 2:length(words)){
+        temp <- y
+        y <- c(temp, sum(dat[,2][1:i]) / total_freq)
+}
+xy <- data.frame(x, y)
+g <- ggplot(xy, aes(x, y)) + geom_point() + xlab("Number of Unique Words") + ylab("Percentage of Total Words Covered") + stat_smooth(method = lm) + scale_x_log10()
+g
+```
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+generate_n_gram <- function(cor, n){
+        dfm_gram <- dfm(cor, removePunct = TRUE, removeNumbers = TRUE, ngram = n)
+        topfeat_gram <- topfeatures(dfm_gram, length(total_sam))
+        melt(data.frame(t(topfeat_gram[topfeat_gram > 1]), stringsAsFactors = FALSE))
+}
+
+words_2_gram <- generate_n_gram(qcor, 2)
+words_3_gram <- generate_n_gram(qcor, 3)
+words_4_gram <- generate_n_gram(qcor, 4)
+words_5_gram <- generate_n_gram(qcor, 5)
+
+```
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+
+prep <- function(str){
+        temp <- tolower(str)
+        temp <- gsub("'", ".", temp)
+        temp
+}
+
+get_next_word_2gram <- function(input, k = 5){
+        temp <- grep(paste("^", prep(input), "_", sep = ""), words_2_gram[,1], value = TRUE)[1:k]
+        result <- unlist(strsplit(as.character(temp),"_"))[2*(1:k)]
+        if (all(is.na(result))){ return(NULL) }
+        else result[!is.na(result)]
+}
+
+get_next_word_2gram("of")
+
+get_next_word_3gram <- function(input1, input2, k = 5){
+        temp <- grep(paste("^", prep(input1), "_", prep(input2), "_", sep = ""), words_3_gram[,1], value = TRUE)[1:k]
+        result <- unlist(strsplit(as.character(temp),"_"))[3*(1:k)]
+        if (any(is.na(result))){
+                output <- c(result[!is.na(result)], get_next_word_2gram(input2, k))
+                unique(output)[1:k]
+        }
+        else result
+}
+
+get_next_word_3gram("I", "think")
+
+get_next_word_4gram <- function(input1, input2, input3, k = 5){
+        temp <- grep(paste("^", prep(input1), "_", prep(input2), "_", prep(input3), "_",sep = ""), words_4_gram[,1], value = TRUE)[1:k]
+        result <- unlist(strsplit(as.character(temp),"_"))[4*(1:k)]
+        if (any(is.na(result))){
+                output <- c(result[!is.na(result)], get_next_word_3gram(input2, input3, k))
+                unique(output)[1:k]
+        }
+        else result
+}
+
+get_next_word_4gram("happy", "birthday", "to")
+
+get_next_word_5gram <- function(input1, input2, input3, input4, k = 5){
+        pattern <- paste("^", prep(input1), "_", prep(input2), "_", prep(input3), "_", prep(input4), "_", sep = "")
+        temp <- grep(pattern, words_5_gram[,1], value = TRUE)[1:k]
+        result <- unlist(strsplit(as.character(temp),"_"))[5*(1:k)]
+        if (any(is.na(result))){
+                output <- c(result[!is.na(result)], get_next_word_4gram(input2, input3, input4, k))
+                unique(output)[1:k]
+        }
+        else result
+}
+
+get_next_word_5gram("I", "think", "this", "will")
+```
